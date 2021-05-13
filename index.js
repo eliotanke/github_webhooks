@@ -18,13 +18,14 @@ async function findConversation(name) {
   }
 }
 
-async function publishMessage(id, text) {
+async function publishMessage(id, text, username, icon_url) {
   try {
     const result = await client.chat.postMessage({
       token: "xoxb-your-token",
       channel: id,
-      text: text
-      // You could also use a blocks[] array to send richer content
+      text,
+      username,
+      icon_url
     });
     console.log(result);
   } catch (error) {
@@ -63,7 +64,9 @@ exports.handler = async (event) => {
                 const pr_link = `[${title}](${html_url})`;
                 publishMessage(
                     id, 
-                    `@payments-devs! @${slack_user} created a PR: ${pr_link}`
+                    `@payments-devs CR please: ${pr_link}`,
+                    slack_user,
+                    avatar_url
                 );
                 break;
             case 'commented':
