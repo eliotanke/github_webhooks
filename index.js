@@ -56,18 +56,29 @@ exports.handler = async (event) => {
     console.log("pull request title: " + title);
     console.log("pull request url: " + html_url);
     
-    console.log("slack username: " + slack_user);
-    
     findConversation('team-best-team-prs-hackathon').then(id => {
         switch(action) {
             case 'opened':
                 const pr_link = `[${title}](${html_url})`;
+                const message = `@payments-devs CR please: ${pr_link}`;
+                
+                console.log("-----------------------------------------------");
+                console.log("[START] publishMessage API call");
+                console.log("[parameter] channel id: " + id);
+                console.log("[parameter] message: " + message);
+                console.log("[parameter] slack username: " + slack_user);
+                console.log("[parameter] github avatar url: " + avatar_url);
+                
                 publishMessage(
                     id, 
-                    `@payments-devs CR please: ${pr_link}`,
+                    message,
                     slack_user,
                     avatar_url
                 );
+                
+                console.log("[END] publishMessage API call");
+                console.log("-----------------------------------------------");
+              
                 break;
             case 'commented':
                 // Add comment to post in Slack
