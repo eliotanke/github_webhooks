@@ -9,7 +9,7 @@ const ddb = new AWS.DynamoDB({apiVersion: '2012-08-10'});
 
 // ---------- Constants
 
-const token = 'xoxp-2068572193780-2059334412149-2088454915248-ea09a58b78a316acd778f05e87385bf1';
+const token = 'xoxp-2068572193780-2059334412149-2065092808754-69e667354cb11b13885f47322fca10ab';
 const channel_name = 'team-best-team-prs-hackathon';
 const base_slack_url = 'https://slack.com/api';
 const team_name = 'elio.tanke';
