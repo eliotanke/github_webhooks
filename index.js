@@ -1,101 +1,145 @@
-const { WebClient, LogLevel } = require("@slack/web-api");
+const axios = require('axios');
+const FormData = require('form-data');
+const qs = require('qs');
+const AWS = require('aws-sdk');
 
-const token = "xoxb-2068572193780-2086266869232-JiDXFpQoKgppqZZPOlcrqECl";
+AWS.config.update({region: 'us-east-2'});
 
-const client = new WebClient(
-  token, 
-  {
-    logLevel: LogLevel.DEBUG
-  }
-);
+const ddb = new AWS.DynamoDB({apiVersion: '2012-08-10'});
 
-async function findConversation(name) {
-  try {
-    const { channels } = await client.conversations.list();
-    
-    const { id } = channels.find(channel => channel.name === name);
-    
-    return id;
-  } catch (error) {
-    console.error(error);
-  }
-}
+// ---------- Constants
 
-async function publishMessage(id, text, username, icon_url) {
-  try {
-    const result = await client.chat.postMessage({
-      channel: id,
-      text,
-      username,
-      icon_url
-    });
-    console.log(result);
-  } catch (error) {
-    console.error(error);
-  }
-}
+const token = 'xoxp-2068572193780-2059334412149-2065106501474-9c906d3a96e08f01f204b0be3949fbc3';
+const channel_name = 'team-best-team-prs-hackathon';
+const base_slack_url = 'https://slack.com/api';
+const team_name = 'elio.tanke';
+const table_name = 'github_pr_slack_message_mapping';
 
-const usernameMap = {
-    'rosalynn-chong-clio': 'rosalynn.chong',
-    'coryb2424': 'cory.bonneau',
-    'JRSpencer': 'james.spencer',
-    'rogerli2012': 'roger.li',
-    'eliotanke': 'elio.tanke',
+const username_email_map = {
+    'rosalynn-chong-clio': 'rosalynn.chong@clio.com',
+    'coryb2424': 'cory.bonneau@clio.com',
+    'JRSpencer': 'james.spencer@clio.com',
+    'rogerli2012': 'roger.li@clio.com',
+    'eliotanke': 'elio.tanke@clio.com',
 };
 
-exports.handler = async (event) => {
-    // Log the request
-    console.log("event: " + JSON.stringify(event));
-    
-    const { pull_request, action } = event;
-    const { html_url, title, user } = pull_request;
-    const { login, avatar_url } = user;
-    const slack_user = usernameMap[login];
-    
-    console.log("github username: " + login);
-    console.log("github action: " + action);
-    
-    console.log("pull request title: " + title);
-    console.log("pull request url: " + html_url);
-    
-    findConversation('team-best-team-prs-hackathon').then(id => {
-        switch(action) {
-            case 'opened':
-                const pr_link = `[${title}](${html_url})`;
-                const message = `@payments-devs CR please: ${pr_link}`;
-                
-                console.log("-----------------------------------------------");
-                console.log("[START] publishMessage API call");
-                console.log("[parameter] channel id: " + id);
-                console.log("[parameter] message: " + message);
-                console.log("[parameter] slack username: " + slack_user);
-                console.log("[parameter] github avatar url: " + avatar_url);
-                
-                publishMessage(
-                    id, 
-                    message,
-                    slack_user,
-                    avatar_url
-                );
-                
-                console.log("[END] publishMessage API call");
-                console.log("-----------------------------------------------");
-              
-                break;
-            case 'commented':
-                // Add comment to post in Slack
-                // Add :comment: emoji to post in Slack
-                break;
-            case 'approved':
-                // Add comment 'Approved by @slackUsername' to post in Slack
-                // Add :check: emoji to post in Slack
-                break;
-            case 'closed':
-                // Add :merged: emoji to post in Slack
-                break;
-            default:
-                console.log("We are ignoring this event");
+// ---------- Axios wrappers to call the Slack API
+
+const get = async (url, data) => await axios.post(url, qs.stringify(data));
+
+const post = async (url, data) => {
+    const form = new FormData();
+    Object.entries(data).forEach(([key, value]) => {
+        form.append(key, value);
+    });
+    return await axios.post(
+        url,
+        form,
+        { headers: form.getHeaders() }
+    );
+};
+
+// ---------- External calls to Slack API
+
+const getChannelId = async (channel_name) => {
+    const { data } = await get(
+        "https://slack.com/api/conversations.list",
+        { token }
+    );
+    return data.channels.find(({ name }) => channel_name === name).id;
+};
+
+const getSlackUserId = async (github_login) => {
+    const email = username_email_map[github_login];
+    const { data } = await post(`${base_slack_url}/users.lookupByEmail`,
+        {
+            token,
+            email,
+        }
+    );
+    return data.user.id;
+};
+
+const postMessage = async (channel, text, username, link_names = 1) => {
+    return await post(`${base_slack_url}/chat.postMessage`,
+        {
+            token,
+            channel,
+            text,
+            username,
+            link_names,
+        }
+    );
+};
+
+const savePullRequestMapping = (github_url, slack_message_id) => {
+    const params = {
+        TableName: table_name,
+        Item: {
+            'GITHUB_URL': { S: String(github_url) },
+            'SLACK_MESSAGE_ID': { S: String(slack_message_id) },
+        },
+    };
+    ddb.putItem(params, (err) => {
+        if (err) {
+            console.log("Error", err);
         }
     });
+};
+
+const getPullRequestMapping = (github_url) => {
+    const params = {
+        TableName: table_name,
+        Key: {
+            'GITHUB_URL': { S: String(github_url) },
+        },
+        ProjectionExpression: 'SLACK_MESSAGE_ID'
+    };
+    ddb.getItem(params, function(err) {
+        if (err) {
+            console.log("Error", err);
+        }
+    });
+};
+
+// ---------- Simple helpers
+
+const getMessage = (url, title) => `@${team_name} CR please: <${url}|${title}>`;
+
+// ---------- Event handling logic
+
+exports.handler = async (event) => {
+    console.log("event: " + JSON.stringify(event));
+
+    const { pull_request, action } = event;
+    const { html_url, title, user } = pull_request;
+    const { login } = user;
+
+    const channel_id = await getChannelId(channel_name);
+    const slack_user_id = await getSlackUserId(login);
+
+    switch (action) {
+        case 'opened':
+            const post_message_response = await postMessage(
+                channel_id,
+                getMessage(html_url, title),
+                slack_user_id
+            );
+            savePullRequestMapping(html_url, post_message_response.data.ts);
+            break;
+        case 'commented':
+            // Add comment to post in Slack
+            // Add :comment: emoji to post in Slack
+            break;
+        case 'approved':
+            // Add comment 'Approved by @slackUsername' to post in Slack
+            // Add :check: emoji to post in Slack
+            break;
+        case 'closed':
+            // Add :merged: emoji to post in Slack
+            break;
+        default:
+            console.log("We are ignoring this event");
+    }
 };
 
