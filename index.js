@@ -52,7 +52,7 @@ const getChannelId = async (channel_name) => {
 const getSlackUserId = async (github_login) => {
     const email = username_email_map[github_login];
     const { data } = await post(`${base_slack_url}/users.lookupByEmail`,
-    {
+        {
             token,
             email,
         }
@@ -61,8 +61,8 @@ const getSlackUserId = async (github_login) => {
 };
 
 const postMessage = async (channel, text, username, link_names = 1) => {
-    await post(`${base_slack_url}/chat.postMessage`,
-    {
+    return await post(`${base_slack_url}/chat.postMessage`,
+        {
             token,
             channel,
             text,
@@ -74,14 +74,31 @@ const postMessage = async (channel, text, username, link_names = 1) => {
 
 const savePullRequestMapping = (github_url, slack_message_id) => {
     const params = {
-        'TableName': table_name,
-        'Item': {
-            'GITHUB_URL': github_url,
-            'SLACK_MESSAGE_ID': slack_message_id,
+        TableName: table_name,
+        Item: {
+            'GITHUB_URL': { S: String(github_url) },
+            'SLACK_MESSAGE_ID': { S: String(slack_message_id) },
         },
     };
-    ddb.putItems(params, (error, data) => {
-        if (error) console.log("DDB Error", error);
+    ddb.putItem(params, (err) => {
+        if (err) {
+            console.log("Error", err);
+        }
+    });
+};
+
+const getPullRequestMapping = (github_url) => {
+    const params = {
+        TableName: table_name,
+        Key: {
+            'GITHUB_URL': { S: String(github_url) },
+        },
+        ProjectionExpression: 'SLACK_MESSAGE_ID'
+    };
+    ddb.getItem(params, function(err) {
+        if (err) {
+            console.log("Error", err);
+        }
     });
 };
 
@@ -93,7 +110,7 @@ const getMessage = (url, title) => `@${team_name} CR please: <${url}|${title}>`;
 
 exports.handler = async (event) => {
     console.log("event: " + JSON.stringify(event));
-    
+
     const { pull_request, action } = event;
     const { html_url, title, user } = pull_request;
     const { login } = user;
@@ -103,13 +120,12 @@ exports.handler = async (event) => {
 
     switch (action) {
         case 'opened':
-        case 'reopened':
             const post_message_response = await postMessage(
                 channel_id,
                 getMessage(html_url, title),
                 slack_user_id
             );
-            // savePullRequestMapping(html_url, post_message_response.data.ts);
+            savePullRequestMapping(html_url, post_message_response.data.ts);
             break;
         case 'commented':
             // Add comment to post in Slack
