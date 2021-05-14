@@ -139,7 +139,7 @@ exports.handler = async (event) => {
             // Add :merged: emoji to post in Slack
             break;
         default:
-            console.log("We are ignoring this event");
+            console.log('We are ignoring this event');
     }
 };
 
