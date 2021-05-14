@@ -9,7 +9,7 @@ const ddb = new AWS.DynamoDB({apiVersion: '2012-08-10'});
 
 // ---------- Constants
 
-const token = 'xoxp-2068572193780-2059334412149-2065092808754-69e667354cb11b13885f47322fca10ab';
+const token = 'xoxp-2068572193780-2059334412149-2065106501474-9c906d3a96e08f01f204b0be3949fbc3';
 const channel_name = 'team-best-team-prs-hackathon';
 const base_slack_url = 'https://slack.com/api';
 const team_name = 'elio.tanke';
@@ -104,12 +104,12 @@ exports.handler = async (event) => {
     switch (action) {
         case 'opened':
         case 'reopened':
-            const { ts } = await postMessage(
+            const post_message_response = await postMessage(
                 channel_id,
                 getMessage(html_url, title),
                 slack_user_id
             );
-            // savePullRequestMapping(html_url, ts);
+            // savePullRequestMapping(html_url, post_message_response.data.ts);
             break;
         case 'commented':
             // Add comment to post in Slack
