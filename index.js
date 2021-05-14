@@ -1,14 +1,17 @@
 const { WebClient, LogLevel } = require("@slack/web-api");
 
-const client = new WebClient("xoxb-your-token", {
-  logLevel: LogLevel.DEBUG
-});
+const token = "xoxb-2068572193780-2086266869232-JiDXFpQoKgppqZZPOlcrqECl";
+
+const client = new WebClient(
+  token, 
+  {
+    logLevel: LogLevel.DEBUG
+  }
+);
 
 async function findConversation(name) {
   try {
-    const { channels } = await client.conversations.list({
-      token: "xoxb-your-token"
-    });
+    const { channels } = await client.conversations.list();
     
     const { id } = channels.find(channel => channel.name === name);
     
@@ -21,7 +24,6 @@ async function findConversation(name) {
 async function publishMessage(id, text, username, icon_url) {
   try {
     const result = await client.chat.postMessage({
-      token: "xoxb-your-token",
       channel: id,
       text,
       username,
