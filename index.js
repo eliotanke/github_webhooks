@@ -15,13 +15,20 @@ const base_slack_url = 'https://slack.com/api';
 const team_name = 'elio.tanke';
 const table_name = 'github_pr_slack_message_mapping';
 
-const username_email_map = {
-    'rosalynn-chong-clio': 'rosalynn.chong@clio.com',
-    'coryb2424': 'cory.bonneau@clio.com',
-    'JRSpencer': 'james.spencer@clio.com',
-    'rogerli2012': 'roger.li@clio.com',
-    'eliotanke': 'elio.tanke@clio.com',
+const github_slack_username_map = {
+    'rosalynn-chong-clio': 'rosalynn.chong',
+    'coryb2424': 'cory.bonneau',
+    'JRSpencer': 'james.spencer',
+    'rogerli2012': 'roger.li',
+    'eliotanke': 'elio.tanke',
 };
+
+// ---------- Simple helpers
+
+const getCreateMessage = (url, title) => `@${team_name} CR please: <${url}|${title}>`;
+const getCommentMessage = (url, requestor, commenter) => `Hey @${requestor}! ${commenter} <${url}|commented> on your pull request`;
+const getSlackUsername = github_username => github_slack_username_map[github_username] || 'Unknown';
+const getClioEmail = github_username => `${getSlackUsername(github_username)}@clio.com`;
 
 // ---------- Axios wrappers to call the Slack API
 
@@ -41,33 +48,26 @@ const post = async (url, data) => {
 
 // ---------- External calls to Slack API
 
-const getChannelId = async (channel_name) => {
-    const { data } = await get(
-        "https://slack.com/api/conversations.list",
-        { token }
-    );
+const getChannelId = async () => {
+    const { data } = await get(`${base_slack_url}/conversations.list`, { token });
     return data.channels.find(({ name }) => channel_name === name).id;
 };
 
-const getSlackUserId = async (github_login) => {
-    const email = username_email_map[github_login];
-    const { data } = await post(`${base_slack_url}/users.lookupByEmail`,
-        {
-            token,
-            email,
-        }
-    );
+const getSlackUserId = async (github_username) => {
+    const email = getClioEmail((github_username));
+    const { data } = await post(`${base_slack_url}/users.lookupByEmail`, { token, email });
     return data.user.id;
 };
 
-const postMessage = async (channel, text, username, link_names = 1) => {
+const postMessage = async (channel, text, username, thread_ts) => {
     return await post(`${base_slack_url}/chat.postMessage`,
         {
             token,
             channel,
             text,
             username,
-            link_names,
+            ...thread_ts && { thread_ts },
+            link_names: 1,
         }
     );
 };
@@ -83,7 +83,7 @@ const savePullRequestMapping = async (github_url, slack_message_id) => {
     return await ddb.putItem(params).promise();
 };
 
-const getPullRequestMapping = async (github_url) => {
+const getSlackMessageId = async (github_url) => {
     const params = {
         TableName: table_name,
         Key: {
@@ -91,40 +91,67 @@ const getPullRequestMapping = async (github_url) => {
         },
         ProjectionExpression: 'SLACK_MESSAGE_ID'
     };
-    return await ddb.getItem(params).promise();
+    const { Item } = await ddb.getItem(params).promise();
+    return Item.SLACK_MESSAGE_ID.S;
 };
-
-// ---------- Simple helpers
-
-const getMessage = (url, title) => `@${team_name} CR please: <${url}|${title}>`;
 
 // ---------- Event handling logic
 
 exports.handler = async (event) => {
     console.log("event: " + JSON.stringify(event));
 
-    const { pull_request, action } = event;
-    const { html_url, title, user } = pull_request;
-    const { login } = user;
-
-    const channel_id = await getChannelId(channel_name);
-    const slack_user_id = await getSlackUserId(login);
+    const { action, pull_request, comment, review } = event;
+    const channel_id = await getChannelId();
 
     switch (action) {
         case 'opened':
-            const post_message_response = await postMessage(
-                channel_id,
-                getMessage(html_url, title),
-                slack_user_id
-            );
-            await savePullRequestMapping(html_url, post_message_response.data.ts);
-            break;
-        case 'commented':
-            // Add comment to post in Slack
-            // Add :comment: emoji to post in Slack
-            const res = await getPullRequestMapping(html_url);
-            console.log(res);
-            break;
+            if (pull_request) {
+                const pull_request_url = pull_request.html_url;
+                const pull_request_title = pull_request.title;
+
+                const github_requestor_username = pull_request.user.login;
+
+                const message = getCreateMessage(pull_request_url, pull_request_title);
+                const slack_user_id = await getSlackUserId(github_requestor_username);
+
+                const post_message_response = await postMessage(
+                    channel_id,
+                    message,
+                    slack_user_id
+                );
+
+                const slack_message_id = post_message_response.data.ts;
+
+                await savePullRequestMapping(pull_request_url, slack_message_id);
+                break;
+            }
+        case 'submitted':
+            if (review) {
+                console.log("REVIEWED");
+                break;
+            }
+        case 'created':
+            if (comment) {
+                // Add :comment: emoji to post in Slack
+                const github_requestor_username = pull_request.user.login;
+                const github_commenter_username = comment.user.login;
+
+                const requestor = getSlackUsername(github_requestor_username);
+                const commenter = getSlackUsername(github_commenter_username);
+
+                const message = getCommentMessage(comment.html_url, requestor, commenter);
+
+                const slack_user_id = await getSlackUserId(github_commenter_username);
+                const slack_message_id = await getSlackMessageId(pull_request.html_url);
+
+                await postMessage(
+                    channel_id,
+                    message,
+                    slack_user_id,
+                    slack_message_id
+                );
+                break;
+            }
         case 'approved':
             // Add comment 'Approved by @slackUsername' to post in Slack
             // Add :check: emoji to post in Slack
