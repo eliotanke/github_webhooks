@@ -17,6 +17,7 @@ const table_name = 'github_pr_slack_message_mapping';
 
 const emoji_approved = 'white_check_mark';
 const emoji_comment = 'speech_balloon';
+const emoji_merged = 'ship';
 
 const github_slack_username_map = {
     'rosalynn-chong-clio': 'rosalynn.chong',
@@ -32,6 +33,7 @@ const github_slack_username_map = {
 const getCreateMessage = (url, title) => `@${team_name} CR please: <${url}|${title}>`;
 const getCommentMessage = (url, requester, commenter) => `@${requester} :${emoji_comment}: ${commenter} <${url}|commented>`;
 const getApprovedMessage = (url, requester, approver) => `@${requester} :${emoji_approved}: ${approver} <${url}|approved>`;
+const getMergedMessage = () => `:${emoji_merged}: Shipped!`;
 const getSlackUsername = github_username => github_slack_username_map[github_username] || 'Unknown';
 const getClioEmail = github_username => `${getSlackUsername(github_username)}@clio.com`;
 
@@ -155,6 +157,20 @@ const handleReview = async (pull_request, review) => {
     await addReaction(slack_channel_id, slack_emoji, slack_message_id);
 };
 
+const handleClosed = async (pull_request) => {
+    if (!pull_request.merged) return;
+
+    const github_requester_username = pull_request.user.login;
+
+    const slack_channel_id = await getChannelId();
+    const slack_message = getMergedMessage();
+    const slack_user_id = await getSlackUserId(github_requester_username);
+    const slack_message_id = await getSlackMessageId(pull_request.html_url);
+
+    await postMessage(slack_channel_id, slack_message, slack_user_id, slack_message_id);
+    await addReaction(slack_channel_id, emoji_merged, slack_message_id);
+};
+
 // ---------- Event handling logic
 
 exports.handler = async (event) => {
@@ -170,7 +186,7 @@ exports.handler = async (event) => {
             await handleReview(pull_request, review);
             break;
         case 'closed':
-            // Add :merged: emoji to post in Slack
+            await handleClosed(pull_request);
             break;
         default:
             console.log('We are ignoring this event');
