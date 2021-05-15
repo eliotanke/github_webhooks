@@ -9,7 +9,7 @@ const ddb = new AWS.DynamoDB({apiVersion: '2012-08-10'});
 
 // ---------- Constants
 
-const token = 'xoxp-2068572193780-2059334412149-2065106501474-9c906d3a96e08f01f204b0be3949fbc3';
+const token = process.env.TOKEN;
 const channel_name = 'team-best-team-prs-hackathon';
 const base_slack_url = 'https://slack.com/api';
 const team_name = 'elio.tanke';
@@ -30,8 +30,8 @@ const github_slack_username_map = {
 // ---------- Simple helpers
 
 const getCreateMessage = (url, title) => `@${team_name} CR please: <${url}|${title}>`;
-const getCommentMessage = (url, requester, commenter) => `@${requester} :${emoji_comment}: ${commenter} <${url}|commented> on your PR`;
-const getApprovedMessage = (url, requester, approver) => `@${requester} :${emoji_approved}: ${approver} <${url}|approved> your PR`;
+const getCommentMessage = (url, requester, commenter) => `@${requester} :${emoji_comment}: ${commenter} <${url}|commented>`;
+const getApprovedMessage = (url, requester, approver) => `@${requester} :${emoji_approved}: ${approver} <${url}|approved>`;
 const getSlackUsername = github_username => github_slack_username_map[github_username] || 'Unknown';
 const getClioEmail = github_username => `${getSlackUsername(github_username)}@clio.com`;
 
@@ -79,7 +79,6 @@ const postMessage = async (channel, text, username, thread_ts) => {
             text,
             username,
             ...thread_ts && { thread_ts },
-            as_user: String(false),
             link_names: String(true),
             unfurl_links: String(!thread_ts)
         }
@@ -169,6 +168,7 @@ exports.handler = async (event) => {
             break;
         case 'submitted':
             await handleReview(pull_request, review);
+            break;
         case 'closed':
             // Add :merged: emoji to post in Slack
             break;
