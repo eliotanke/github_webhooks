@@ -26,41 +26,48 @@ const github_slack_username_map = {
 // ---------- Simple helpers
 
 const getCreateMessage = (url, title) => `@${team_name} CR please: <${url}|${title}>`;
-const getCommentMessage = (url, requestor, commenter) => `Hey @${requestor}! ${commenter} <${url}|commented> on your pull request`;
+const getCommentMessage = (url, requester, commenter) => `Hey @${requester}! ${commenter} <${url}|commented> on your pull request`;
 const getSlackUsername = github_username => github_slack_username_map[github_username] || 'Unknown';
 const getClioEmail = github_username => `${getSlackUsername(github_username)}@clio.com`;
 
 // ---------- Axios wrappers to call the Slack API
 
-const get = async (url, data) => await axios.post(url, qs.stringify(data));
-
-const post = async (url, data) => {
+const createForm = data => {
     const form = new FormData();
-    Object.entries(data).forEach(([key, value]) => {
-        form.append(key, value);
-    });
-    return await axios.post(
-        url,
-        form,
-        { headers: form.getHeaders() }
-    );
+    Object.entries(data).forEach(([key, value]) => form.append(key, value));
+    return form;
+};
+
+const get = async (path, data) => await axios.post(`${base_slack_url}/${path}`, qs.stringify(data));
+
+const post = async (path, data) => {
+    const url = `${base_slack_url}/${path}`;
+    const form = createForm(data);
+
+    return await axios.post(url, form, { headers: form.getHeaders() });
 };
 
 // ---------- External calls to Slack API
 
 const getChannelId = async () => {
-    const { data } = await get(`${base_slack_url}/conversations.list`, { token });
+    const { data } = await get('conversations.list', { token });
     return data.channels.find(({ name }) => channel_name === name).id;
 };
 
 const getSlackUserId = async (github_username) => {
     const email = getClioEmail((github_username));
-    const { data } = await post(`${base_slack_url}/users.lookupByEmail`, { token, email });
+    const { data } = await post('users.lookupByEmail', { token, email });
     return data.user.id;
 };
 
+const addReaction = async (channel, name, timestamp) => {
+    return await post('reactions.add',
+        { token, channel, name, timestamp }
+    );
+};
+
 const postMessage = async (channel, text, username, thread_ts) => {
-    return await post(`${base_slack_url}/chat.postMessage`,
+    return await post('chat.postMessage',
         {
             token,
             channel,
@@ -71,6 +78,8 @@ const postMessage = async (channel, text, username, thread_ts) => {
         }
     );
 };
+
+// ---------- Calls to DynamoDB API
 
 const savePullRequestMapping = async (github_url, slack_message_id) => {
     const params = {
@@ -109,16 +118,13 @@ exports.handler = async (event) => {
                 const pull_request_url = pull_request.html_url;
                 const pull_request_title = pull_request.title;
 
-                const github_requestor_username = pull_request.user.login;
+                const github_requester_username = pull_request.user.login;
 
                 const message = getCreateMessage(pull_request_url, pull_request_title);
-                const slack_user_id = await getSlackUserId(github_requestor_username);
 
-                const post_message_response = await postMessage(
-                    channel_id,
-                    message,
-                    slack_user_id
-                );
+                const slack_user_id = await getSlackUserId(github_requester_username);
+
+                const post_message_response = await postMessage(channel_id, message, slack_user_id);
 
                 const slack_message_id = post_message_response.data.ts;
 
@@ -132,24 +138,20 @@ exports.handler = async (event) => {
             }
         case 'created':
             if (comment) {
-                // Add :comment: emoji to post in Slack
-                const github_requestor_username = pull_request.user.login;
+                const github_requester_username = pull_request.user.login;
                 const github_commenter_username = comment.user.login;
 
-                const requestor = getSlackUsername(github_requestor_username);
+                const requester = getSlackUsername(github_requester_username);
                 const commenter = getSlackUsername(github_commenter_username);
 
-                const message = getCommentMessage(comment.html_url, requestor, commenter);
+                const message = getCommentMessage(comment.html_url, requester, commenter);
 
                 const slack_user_id = await getSlackUserId(github_commenter_username);
                 const slack_message_id = await getSlackMessageId(pull_request.html_url);
+                const slack_emoji = 'comment';
 
-                await postMessage(
-                    channel_id,
-                    message,
-                    slack_user_id,
-                    slack_message_id
-                );
+                await postMessage(channel_id, message, slack_user_id, slack_message_id);
+                await addReaction(channel_id, slack_emoji, slack_message_id);
                 break;
             }
         case 'approved':
