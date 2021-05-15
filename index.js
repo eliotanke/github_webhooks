@@ -30,7 +30,8 @@ const github_slack_username_map = {
 // ---------- Simple helpers
 
 const getCreateMessage = (url, title) => `@${team_name} CR please: <${url}|${title}>`;
-const getCommentMessage = (url, requester, commenter) => `Hey @${requester}! ${commenter} <${url}|commented> on your pull request`;
+const getCommentMessage = (url, requester, commenter) => `@${requester} :${emoji_comment}: ${commenter} <${url}|commented> on your PR`;
+const getApprovedMessage = (url, requester, approver) => `@${requester} :${emoji_approved}: ${approver} <${url}|approved> your PR`;
 const getSlackUsername = github_username => github_slack_username_map[github_username] || 'Unknown';
 const getClioEmail = github_username => `${getSlackUsername(github_username)}@clio.com`;
 
@@ -78,7 +79,8 @@ const postMessage = async (channel, text, username, thread_ts) => {
             text,
             username,
             ...thread_ts && { thread_ts },
-            link_names: String(1),
+            as_user: String(false),
+            link_names: String(true),
             unfurl_links: String(!thread_ts)
         }
     );
@@ -109,60 +111,64 @@ const getSlackMessageId = async (github_url) => {
     return Item.SLACK_MESSAGE_ID.S;
 };
 
+// ---------- Event handlers
+
+const handleCreate = async (pull_request) => {
+    const pull_request_url = pull_request.html_url;
+    const pull_request_title = pull_request.title;
+
+    const github_requester_username = pull_request.user.login;
+
+    const slack_channel_id = await getChannelId();
+    const slack_message = getCreateMessage(pull_request_url, pull_request_title);
+    const slack_user_id = await getSlackUserId(github_requester_username);
+    const slack_message_response = await postMessage(slack_channel_id, slack_message, slack_user_id);
+    const slack_message_id = slack_message_response.data.ts;
+
+    await savePullRequestMapping(pull_request_url, slack_message_id);
+};
+
+const handleReview = async (pull_request, review) => {
+    const github_requester_username = pull_request.user.login;
+    const github_reviewer_username = review.user.login;
+
+    const requester = getSlackUsername(github_requester_username);
+    const reviewer = getSlackUsername(github_reviewer_username);
+
+    const approved_message = getApprovedMessage(
+        review.html_url,
+        requester,
+        reviewer
+    );
+    const comment_message = getCommentMessage(
+        review.html_url,
+        requester,
+        reviewer
+    );
+
+    const slack_channel_id = await getChannelId();
+    const slack_message = review.state === 'approved' ? approved_message : comment_message;
+    const slack_user_id = await getSlackUserId(github_reviewer_username);
+    const slack_message_id = await getSlackMessageId(pull_request.html_url);
+    const slack_emoji = review.state === 'approved' ? emoji_approved : emoji_comment;
+
+    await postMessage(slack_channel_id, slack_message, slack_user_id, slack_message_id);
+    await addReaction(slack_channel_id, slack_emoji, slack_message_id);
+};
+
 // ---------- Event handling logic
 
 exports.handler = async (event) => {
     console.log("event: " + JSON.stringify(event));
 
-    const { action, pull_request, comment, review } = event;
-    const channel_id = await getChannelId();
-
-    let slack_message_id;
+    const { action, pull_request, review } = event;
 
     switch (action) {
         case 'opened':
-            const pull_request_url = pull_request.html_url;
-            const pull_request_title = pull_request.title;
-
-            const github_requester_username = pull_request.user.login;
-
-            const message = getCreateMessage(pull_request_url, pull_request_title);
-
-            const slack_user_id = await getSlackUserId(github_requester_username);
-            const slack_message_response = await postMessage(channel_id, message, slack_user_id);
-
-            slack_message_id = slack_message_response.data.ts;
-
-            await savePullRequestMapping(pull_request_url, slack_message_id);
+            await handleCreate(pull_request);
             break;
         case 'submitted':
-            if (review) {
-                slack_message_id = await getSlackMessageId(pull_request.html_url);
-
-                switch (review.state) {
-                    case 'approved':
-                        await addReaction(channel_id, emoji_approved, slack_message_id);
-                        break;
-                    case 'commented':
-                    case 'changes_requested':
-                        const github_requester_username = pull_request.user.login;
-                        const github_reviewer_username = review.user.login;
-
-                        const requester = getSlackUsername(github_requester_username);
-                        const reviewer = getSlackUsername(github_reviewer_username);
-
-                        const message = getCommentMessage(review.html_url, requester, reviewer);
-                        const slack_user_id = await getSlackUserId(github_reviewer_username);
-
-                        await postMessage(channel_id, message, slack_user_id, slack_message_id);
-                        await addReaction(channel_id, emoji_comment, slack_message_id);
-                        break;
-                    default:
-                        console.log('Pull request review did not match any predefined states');
-                        return;
-                }
-                break;
-            }
+            await handleReview(pull_request, review);
         case 'closed':
             // Add :merged: emoji to post in Slack
             break;
