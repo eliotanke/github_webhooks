@@ -72,7 +72,7 @@ const postMessage = async (channel, text, username, link_names = 1) => {
     );
 };
 
-const savePullRequestMapping = (github_url, slack_message_id) => {
+const savePullRequestMapping = async (github_url, slack_message_id) => {
     const params = {
         TableName: table_name,
         Item: {
@@ -80,14 +80,10 @@ const savePullRequestMapping = (github_url, slack_message_id) => {
             'SLACK_MESSAGE_ID': { S: String(slack_message_id) },
         },
     };
-    ddb.putItem(params, (err) => {
-        if (err) {
-            console.log("Error", err);
-        }
-    });
+    return await ddb.putItem(params).promise();
 };
 
-const getPullRequestMapping = (github_url) => {
+const getPullRequestMapping = async (github_url) => {
     const params = {
         TableName: table_name,
         Key: {
@@ -95,11 +91,7 @@ const getPullRequestMapping = (github_url) => {
         },
         ProjectionExpression: 'SLACK_MESSAGE_ID'
     };
-    ddb.getItem(params, function(err) {
-        if (err) {
-            console.log("Error", err);
-        }
-    });
+    return await ddb.getItem(params).promise();
 };
 
 // ---------- Simple helpers
@@ -125,11 +117,13 @@ exports.handler = async (event) => {
                 getMessage(html_url, title),
                 slack_user_id
             );
-            savePullRequestMapping(html_url, post_message_response.data.ts);
+            await savePullRequestMapping(html_url, post_message_response.data.ts);
             break;
         case 'commented':
             // Add comment to post in Slack
             // Add :comment: emoji to post in Slack
+            const res = await getPullRequestMapping(html_url);
+            console.log(res);
             break;
         case 'approved':
             // Add comment 'Approved by @slackUsername' to post in Slack
