@@ -10,6 +10,7 @@ const ddb = new AWS.DynamoDB({apiVersion: '2012-08-10'});
 // ---------- Constants
 
 const token = process.env.TOKEN;
+const label = process.env.LABEL;
 const channel_name = 'team-best-team-prs-hackathon';
 const base_slack_url = 'https://slack.com/api';
 const team_name = 'elio.tanke';
@@ -177,6 +178,9 @@ exports.handler = async (event) => {
     console.log("event: " + JSON.stringify(event));
 
     const { action, pull_request, review } = event;
+    const isValidLabel = pull_request.labels.some(({ name }) => name === label);
+
+    if (label && !isValidLabel) return;
 
     switch (action) {
         case 'opened':
