@@ -49,38 +49,49 @@ const createForm = data => {
     return form;
 };
 
-const get = async (path, data) => await axios.post(`${base_slack_url}/${path}`, qs.stringify(data));
+const getAuthHeaders = (slack_user_id) => ({
+    "Authorization": `Bearer ${token}`,
+    ...slack_user_id && { "X-Slack-User": slack_user_id },
+});
 
-const post = async (path, data) => {
+const getOptions = (form, slack_user_id) => ({
+    headers: {
+        ...form.getHeaders(),
+        ...getAuthHeaders(slack_user_id)
+    }
+});
+
+const post = async (path, data, slack_user_id) => {
     const url = `${base_slack_url}/${path}`;
     const form = createForm(data);
-
-    return await axios.post(url, form, { headers: form.getHeaders() });
+    const options = getOptions(form, slack_user_id);
+    return await axios.post(url, form, options);
 };
 
 // ---------- External calls to Slack API
 
 const getChannelId = async () => {
-    const { data } = await get('conversations.list', { token });
+    const { data } = await post('conversations.list', {});
     return data.channels.find(({ name }) => channel_name === name).id;
 };
 
 const getSlackUser = async (github_username) => {
     const email = getClioEmail(github_username);
-    const { data } = await post('users.lookupByEmail', { token, email });
+    const { data } = await post('users.lookupByEmail', { email });
     return data.user;
 };
 
-const addReaction = async (channel, name, timestamp) => {
-    return await post('reactions.add',
-        { token, channel, name, timestamp }
+const addReaction = async (channel, name, slack_user, timestamp) => {
+    return await post(
+        'reactions.add',
+        { channel, name, timestamp },
+        slack_user.id
     );
 };
 
 const postMessage = async (channel, text, slack_user, thread_ts) => {
     return await post('chat.postMessage',
         {
-            token,
             channel,
             text,
             username: slack_user.real_name,
@@ -88,7 +99,8 @@ const postMessage = async (channel, text, slack_user, thread_ts) => {
             ...thread_ts && { thread_ts },
             link_names: String(true),
             unfurl_links: String(!thread_ts)
-        }
+        },
+        slack_user.id
     );
 };
 
@@ -163,7 +175,7 @@ const handleReview = async (pull_request, review) => {
     const slack_emoji = review.state === 'approved' ? emoji_approved : emoji_comment;
 
     await postMessage(slack_channel_id, slack_message, slack_user, slack_message_id);
-    await addReaction(slack_channel_id, slack_emoji, slack_message_id);
+    await addReaction(slack_channel_id, slack_emoji, slack_user, slack_message_id);
 };
 
 const handleClosed = async (pull_request) => {
@@ -177,7 +189,7 @@ const handleClosed = async (pull_request) => {
     const slack_message_id = await getSlackMessageId(pull_request.html_url);
 
     await postMessage(slack_channel_id, slack_message, slack_user, slack_message_id);
-    await addReaction(slack_channel_id, emoji_merged, slack_message_id);
+    await addReaction(slack_channel_id, emoji_merged, slack_user, slack_message_id);
 };
 
 // ---------- Event handling logic
