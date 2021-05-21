@@ -31,8 +31,11 @@ const github_slack_username_map = {
 
 // ---------- Simple helpers
 
+const getCommentMessage = (url, requester, commenter) => {
+    if (requester === commenter) return `:${emoji_comment}: ${commenter} <${url}|commented>`;
+    return `@${requester} :${emoji_comment}: ${commenter} <${url}|commented>`;
+}
 const getCreateMessage = (url, title) => `@${team_name} CR please: <${url}|${title}>`;
-const getCommentMessage = (url, requester, commenter) => `@${requester} :${emoji_comment}: ${commenter} <${url}|commented>`;
 const getApprovedMessage = (url, requester, approver) => `@${requester} :${emoji_approved}: ${approver} <${url}|approved>`;
 const getMergedMessage = () => `:${emoji_merged}: Shipped!`;
 const getSlackUsername = github_username => github_slack_username_map[github_username] || 'Unknown';
@@ -62,10 +65,10 @@ const getChannelId = async () => {
     return data.channels.find(({ name }) => channel_name === name).id;
 };
 
-const getSlackUserId = async (github_username) => {
-    const email = getClioEmail((github_username));
+const getSlackUser = async (github_username) => {
+    const email = getClioEmail(github_username);
     const { data } = await post('users.lookupByEmail', { token, email });
-    return data.user.id;
+    return data.user;
 };
 
 const addReaction = async (channel, name, timestamp) => {
@@ -74,13 +77,14 @@ const addReaction = async (channel, name, timestamp) => {
     );
 };
 
-const postMessage = async (channel, text, username, thread_ts) => {
+const postMessage = async (channel, text, slack_user, thread_ts) => {
     return await post('chat.postMessage',
         {
             token,
             channel,
             text,
-            username,
+            username: slack_user.real_name,
+            icon_url: slack_user.profile?.image_48,
             ...thread_ts && { thread_ts },
             link_names: String(true),
             unfurl_links: String(!thread_ts)
@@ -123,8 +127,12 @@ const handleCreate = async (pull_request) => {
 
     const slack_channel_id = await getChannelId();
     const slack_message = getCreateMessage(pull_request_url, pull_request_title);
-    const slack_user_id = await getSlackUserId(github_requester_username);
-    const slack_message_response = await postMessage(slack_channel_id, slack_message, slack_user_id);
+    const slack_user = await getSlackUser(github_requester_username);
+    const slack_message_response = await postMessage(
+        slack_channel_id,
+        slack_message,
+        slack_user
+    );
     const slack_message_id = slack_message_response.data.ts;
 
     await savePullRequestMapping(pull_request_url, slack_message_id);
@@ -150,11 +158,11 @@ const handleReview = async (pull_request, review) => {
 
     const slack_channel_id = await getChannelId();
     const slack_message = review.state === 'approved' ? approved_message : comment_message;
-    const slack_user_id = await getSlackUserId(github_reviewer_username);
+    const slack_user = await getSlackUser(github_reviewer_username);
     const slack_message_id = await getSlackMessageId(pull_request.html_url);
     const slack_emoji = review.state === 'approved' ? emoji_approved : emoji_comment;
 
-    await postMessage(slack_channel_id, slack_message, slack_user_id, slack_message_id);
+    await postMessage(slack_channel_id, slack_message, slack_user, slack_message_id);
     await addReaction(slack_channel_id, slack_emoji, slack_message_id);
 };
 
@@ -165,10 +173,10 @@ const handleClosed = async (pull_request) => {
 
     const slack_channel_id = await getChannelId();
     const slack_message = getMergedMessage();
-    const slack_user_id = await getSlackUserId(github_requester_username);
+    const slack_user = await getSlackUser(github_requester_username);
     const slack_message_id = await getSlackMessageId(pull_request.html_url);
 
-    await postMessage(slack_channel_id, slack_message, slack_user_id, slack_message_id);
+    await postMessage(slack_channel_id, slack_message, slack_user, slack_message_id);
     await addReaction(slack_channel_id, emoji_merged, slack_message_id);
 };
 
